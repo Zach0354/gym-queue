@@ -261,7 +261,7 @@ export default function App() {
   }, [currentUser, pendingClaims, activeSessions, queues, refreshAll]);
 
   // ---- Queue actions ----
-  const addToQueue = async (equipId) => {
+ const addToQueue = async (equipId) => {
     if (!profile) return;
     const q = queues[equipId] || [];
     if (q.find(u => u.user_id === profile.id)) { showToast("Already in this queue!", "error"); return; }
@@ -269,12 +269,24 @@ export default function App() {
     const { error } = await supabase.from("queue_entries").insert({ equipment_id: equipId, user_id: profile.id });
     if (error) { console.log("JOIN ERROR:", error); showToast("Failed to join queue: " + error.message, "error"); return; }
 
-    if (q.length === 0 && !activeSessions[equipId] && !pendingClaims[equipId]) {
-      await supabase.from("pending_claims").insert({
-        equipment_id: equipId, user_id: profile.id,
-        claim_expires_at: new Date(Date.now() + CLAIM_TIMEOUT * 1000).toISOString(),
-      });
+    // Check if equipment is free and no pending claim exists
+    const { data: existingSession } = await supabase.from("active_sessions").select("*").eq("equipment_id", equipId);
+    const { data: existingClaim } = await supabase.from("pending_claims").select("*").eq("equipment_id", equipId);
+    const { data: currentQueue } = await supabase.from("queue_entries").select("*").eq("equipment_id", equipId).order("joined_at", { ascending: true });
+
+    if ((!existingSession || existingSession.length === 0) && (!existingClaim || existingClaim.length === 0)) {
+      if (currentQueue && currentQueue.length > 0 && currentQueue[0].user_id === profile.id) {
+        await supabase.from("pending_claims").insert({
+          equipment_id: equipId, user_id: profile.id,
+          claim_expires_at: new Date(Date.now() + CLAIM_TIMEOUT * 1000).toISOString(),
+        });
+      }
     }
+
+    const eq = equipment.find(e => e.id === equipId);
+    showToast(`Added to ${eq?.name} queue!`);
+    await refreshAll();
+  };
 
     const eq = equipment.find(e => e.id === equipId);
     showToast(`Added to ${eq?.name} queue!`);
@@ -333,19 +345,37 @@ export default function App() {
     const session = activeSessions[equipId];
     if (!session || session.userId !== profile.id) return;
 
-    console.log("ENDING SESSION:", { equipId, userId: profile.id, sessionUserId: session.userId });
+    console.log("ENDING SESSION:", { equipId, userId: profile.id });
 
-    const { error: delError } = await supabase.from("active_sessions").delete().eq("equipment_id", equipId);
-    if (delError) { console.log("END SESSION ERROR:", delError); showToast("Failed to end session: " + delError.message, "error"); return; }
+    await supabase.from("active_sessions").delete().eq("equipment_id", equipId);
 
-    const q = queues[equipId] || [];
-    if (q.length > 0) {
-      const { error: claimError } = await supabase.from("pending_claims").insert({
-        equipment_id: equipId, user_id: q[0].user_id,
-        claim_expires_at: new Date(Date.now() + CLAIM_TIMEOUT * 1000).toISOString(),
-      });
-      if (claimError) console.log("PROMOTE CLAIM ERROR:", claimError);
+    // Fetch the current queue directly from Supabase (not stale local state)
+    const { data: currentQueue } = await supabase
+      .from("queue_entries")
+      .select("*")
+      .eq("equipment_id", equipId)
+      .order("joined_at", { ascending: true });
+
+    if (currentQueue && currentQueue.length > 0) {
+      const { data: existingClaim } = await supabase
+        .from("pending_claims")
+        .select("*")
+        .eq("equipment_id", equipId);
+
+      if (!existingClaim || existingClaim.length === 0) {
+        const { error: claimError } = await supabase.from("pending_claims").insert({
+          equipment_id: equipId,
+          user_id: currentQueue[0].user_id,
+          claim_expires_at: new Date(Date.now() + CLAIM_TIMEOUT * 1000).toISOString(),
+        });
+        if (claimError) console.log("PROMOTE CLAIM ERROR:", claimError);
+        else console.log("PROMOTED:", currentQueue[0].user_id);
+      }
     }
+
+    showToast("Session ended!");
+    await refreshAll();
+  };
 
     showToast("Session ended!");
     await refreshAll();
