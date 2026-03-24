@@ -327,28 +327,78 @@ export default function App() {
     await refreshAll();
   };
 
-  const endSession = async (equipId) => {
+
+ const endSession = async (equipId) => {
     if (!profile) return;
     const session = activeSessions[equipId];
     if (!session || session.userId !== profile.id) return;
 
-    await supabase.from("active_sessions").delete().eq("equipment_id", equipId);
+    console.log("ENDING SESSION:", { equipId, userId: profile.id, sessionUserId: session.userId });
+
+    const { error: delError } = await supabase.from("active_sessions").delete().eq("equipment_id", equipId);
+    if (delError) { console.log("END SESSION ERROR:", delError); showToast("Failed to end session: " + delError.message, "error"); return; }
+
     const q = queues[equipId] || [];
     if (q.length > 0) {
-      await supabase.from("pending_claims").insert({
+      const { error: claimError } = await supabase.from("pending_claims").insert({
         equipment_id: equipId, user_id: q[0].user_id,
         claim_expires_at: new Date(Date.now() + CLAIM_TIMEOUT * 1000).toISOString(),
       });
+      if (claimError) console.log("PROMOTE CLAIM ERROR:", claimError);
     }
+
     showToast("Session ended!");
     await refreshAll();
   };
 
   // ---- QR ----
   useEffect(() => {
-    if (view === VIEWS.QR && selectedEquipment && qrCanvasRef.current)
-      drawQR(qrCanvasRef.current, `GYMQ:${selectedEquipment}`, QR_SIZE);
-  }, [view, selectedEquipment]);
+    if (!currentUser) return;
+    const t = setInterval(async () => {
+      setTick(n => n + 1);
+      const now = Date.now();
+
+      for (const [eqId, claim] of Object.entries(pendingClaims)) {
+        if (claim && new Date(claim.claim_expires_at).getTime() <= now) {
+          try {
+            await supabase.from("pending_claims").delete().eq("equipment_id", eqId);
+            await supabase.from("queue_entries").delete().eq("equipment_id", eqId).eq("user_id", claim.userId);
+            const q = (queues[eqId] || []).filter(u => u.user_id !== claim.userId);
+            if (q.length > 0 && !activeSessions[eqId]) {
+              const { data: existing } = await supabase.from("pending_claims").select("*").eq("equipment_id", eqId);
+              if (!existing || existing.length === 0) {
+                await supabase.from("pending_claims").insert({
+                  equipment_id: eqId, user_id: q[0].user_id,
+                  claim_expires_at: new Date(now + CLAIM_TIMEOUT * 1000).toISOString(),
+                });
+              }
+            }
+          } catch (e) { console.log("Claim expiry error:", e); }
+          await refreshAll();
+        }
+      }
+
+      for (const [eqId, session] of Object.entries(activeSessions)) {
+        if (session && new Date(session.expires_at).getTime() <= now) {
+          try {
+            await supabase.from("active_sessions").delete().eq("equipment_id", eqId);
+            const q = queues[eqId] || [];
+            if (q.length > 0) {
+              const { data: existing } = await supabase.from("pending_claims").select("*").eq("equipment_id", eqId);
+              if (!existing || existing.length === 0) {
+                await supabase.from("pending_claims").insert({
+                  equipment_id: eqId, user_id: q[0].user_id,
+                  claim_expires_at: new Date(now + CLAIM_TIMEOUT * 1000).toISOString(),
+                });
+              }
+            }
+          } catch (e) { console.log("Session expiry error:", e); }
+          await refreshAll();
+        }
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [currentUser, pendingClaims, activeSessions, queues, refreshAll]);
 
   const handleScanSubmit = () => {
     const trimmed = scanInput.trim();
