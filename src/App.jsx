@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { supabase } from "./supabase";
+import { supabase } from "./supabase.jsx";
 
 const QR_SIZE = 256;
 const CLAIM_TIMEOUT = 120;
