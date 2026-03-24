@@ -302,21 +302,26 @@ export default function App() {
     await refreshAll();
   };
 
-  const claimTurn = async (equipId) => {
+ const claimTurn = async (equipId) => {
     if (!profile) return;
     const claim = pendingClaims[equipId];
     if (!claim || claim.userId !== profile.id) return;
     const eq = equipment.find(e => e.id === equipId);
 
-    const { error } = await supabase.from("active_sessions").insert({
+    console.log("CLAIMING:", { equipId, userId: profile.id });
+
+    const { error: sessionError } = await supabase.from("active_sessions").insert({
       equipment_id: equipId, user_id: profile.id,
       started_at: new Date().toISOString(),
       expires_at: new Date(Date.now() + eq.time_limit_min * 60000).toISOString(),
     });
-    if (error) { showToast("Failed to start session", "error"); return; }
+    if (sessionError) { console.log("SESSION ERROR:", sessionError); showToast("Failed to start: " + sessionError.message, "error"); return; }
 
-    await supabase.from("pending_claims").delete().eq("equipment_id", equipId);
-    await supabase.from("queue_entries").delete().eq("equipment_id", equipId).eq("user_id", profile.id);
+    const { error: claimDelError } = await supabase.from("pending_claims").delete().eq("equipment_id", equipId);
+    if (claimDelError) console.log("CLAIM DELETE ERROR:", claimDelError);
+
+    const { error: queueDelError } = await supabase.from("queue_entries").delete().eq("equipment_id", equipId).eq("user_id", profile.id);
+    if (queueDelError) console.log("QUEUE DELETE ERROR:", queueDelError);
 
     showToast(`Started on ${eq.name}! You have ${eq.time_limit_min} minutes.`);
     await refreshAll();
