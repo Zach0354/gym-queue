@@ -77,7 +77,6 @@ export default function App() {
     if (data) {
       const map = {};
       eqList.forEach(e => (map[e.id] = []));
-      // Batch fetch all profiles we need
       const userIds = [...new Set(data.map(d => d.user_id))];
       const profiles = {};
       if (userIds.length > 0) {
@@ -226,168 +225,6 @@ export default function App() {
       setTick(n => n + 1);
       const now = Date.now();
 
-      // Check expired claims
-      for (const [eqId, claim] of Object.entries(pendingClaims)) {
-        if (claim && new Date(claim.claim_expires_at).getTime() <= now) {
-          await supabase.from("pending_claims").delete().eq("equipment_id", eqId);
-          await supabase.from("queue_entries").delete().eq("equipment_id", eqId).eq("user_id", claim.userId);
-          const q = (queues[eqId] || []).filter(u => u.user_id !== claim.userId);
-          if (q.length > 0) {
-            await supabase.from("pending_claims").insert({
-              equipment_id: eqId, user_id: q[0].user_id,
-              claim_expires_at: new Date(now + CLAIM_TIMEOUT * 1000).toISOString(),
-            });
-          }
-          await refreshAll();
-        }
-      }
-
-      // Check expired sessions
-      for (const [eqId, session] of Object.entries(activeSessions)) {
-        if (session && new Date(session.expires_at).getTime() <= now) {
-          await supabase.from("active_sessions").delete().eq("equipment_id", eqId);
-          const q = queues[eqId] || [];
-          if (q.length > 0) {
-            await supabase.from("pending_claims").insert({
-              equipment_id: eqId, user_id: q[0].user_id,
-              claim_expires_at: new Date(now + CLAIM_TIMEOUT * 1000).toISOString(),
-            });
-          }
-          await refreshAll();
-        }
-      }
-    }, 1000);
-    return () => clearInterval(t);
-  }, [currentUser, pendingClaims, activeSessions, queues, refreshAll]);
-
-  // ---- Queue actions ----
- const addToQueue = async (equipId) => {
-    if (!profile) return;
-    const q = queues[equipId] || [];
-    if (q.find(u => u.user_id === profile.id)) { showToast("Already in this queue!", "error"); return; }
-
-    const { error } = await supabase.from("queue_entries").insert({ equipment_id: equipId, user_id: profile.id });
-    if (error) { console.log("JOIN ERROR:", error); showToast("Failed to join queue: " + error.message, "error"); return; }
-
-    // Check if equipment is free and no pending claim exists
-    const { data: existingSession } = await supabase.from("active_sessions").select("*").eq("equipment_id", equipId);
-    const { data: existingClaim } = await supabase.from("pending_claims").select("*").eq("equipment_id", equipId);
-    const { data: currentQueue } = await supabase.from("queue_entries").select("*").eq("equipment_id", equipId).order("joined_at", { ascending: true });
-
-    if ((!existingSession || existingSession.length === 0) && (!existingClaim || existingClaim.length === 0)) {
-      if (currentQueue && currentQueue.length > 0 && currentQueue[0].user_id === profile.id) {
-        await supabase.from("pending_claims").insert({
-          equipment_id: equipId, user_id: profile.id,
-          claim_expires_at: new Date(Date.now() + CLAIM_TIMEOUT * 1000).toISOString(),
-        });
-      }
-    }
-
-    const eq = equipment.find(e => e.id === equipId);
-    showToast(`Added to ${eq?.name} queue!`);
-    await refreshAll();
-  };
-
-    const eq = equipment.find(e => e.id === equipId);
-    showToast(`Added to ${eq?.name} queue!`);
-    await refreshAll();
-  };
-
-  const leaveQueue = async (equipId) => {
-    if (!profile) return;
-    const q = queues[equipId] || [];
-    const isFirst = q[0]?.user_id === profile.id;
-
-    await supabase.from("queue_entries").delete().eq("equipment_id", equipId).eq("user_id", profile.id);
-
-    if (isFirst && pendingClaims[equipId]?.userId === profile.id) {
-      await supabase.from("pending_claims").delete().eq("equipment_id", equipId);
-      const remaining = q.filter(u => u.user_id !== profile.id);
-      if (remaining.length > 0) {
-        await supabase.from("pending_claims").insert({
-          equipment_id: equipId, user_id: remaining[0].user_id,
-          claim_expires_at: new Date(Date.now() + CLAIM_TIMEOUT * 1000).toISOString(),
-        });
-      }
-    }
-    showToast("Left the queue");
-    await refreshAll();
-  };
-
- const claimTurn = async (equipId) => {
-    if (!profile) return;
-    const claim = pendingClaims[equipId];
-    if (!claim || claim.userId !== profile.id) return;
-    const eq = equipment.find(e => e.id === equipId);
-
-    console.log("CLAIMING:", { equipId, userId: profile.id });
-
-    const { error: sessionError } = await supabase.from("active_sessions").insert({
-      equipment_id: equipId, user_id: profile.id,
-      started_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + eq.time_limit_min * 60000).toISOString(),
-    });
-    if (sessionError) { console.log("SESSION ERROR:", sessionError); showToast("Failed to start: " + sessionError.message, "error"); return; }
-
-    const { error: claimDelError } = await supabase.from("pending_claims").delete().eq("equipment_id", equipId);
-    if (claimDelError) console.log("CLAIM DELETE ERROR:", claimDelError);
-
-    const { error: queueDelError } = await supabase.from("queue_entries").delete().eq("equipment_id", equipId).eq("user_id", profile.id);
-    if (queueDelError) console.log("QUEUE DELETE ERROR:", queueDelError);
-
-    showToast(`Started on ${eq.name}! You have ${eq.time_limit_min} minutes.`);
-    await refreshAll();
-  };
-
-
- const endSession = async (equipId) => {
-    if (!profile) return;
-    const session = activeSessions[equipId];
-    if (!session || session.userId !== profile.id) return;
-
-    console.log("ENDING SESSION:", { equipId, userId: profile.id });
-
-    await supabase.from("active_sessions").delete().eq("equipment_id", equipId);
-
-    // Fetch the current queue directly from Supabase (not stale local state)
-    const { data: currentQueue } = await supabase
-      .from("queue_entries")
-      .select("*")
-      .eq("equipment_id", equipId)
-      .order("joined_at", { ascending: true });
-
-    if (currentQueue && currentQueue.length > 0) {
-      const { data: existingClaim } = await supabase
-        .from("pending_claims")
-        .select("*")
-        .eq("equipment_id", equipId);
-
-      if (!existingClaim || existingClaim.length === 0) {
-        const { error: claimError } = await supabase.from("pending_claims").insert({
-          equipment_id: equipId,
-          user_id: currentQueue[0].user_id,
-          claim_expires_at: new Date(Date.now() + CLAIM_TIMEOUT * 1000).toISOString(),
-        });
-        if (claimError) console.log("PROMOTE CLAIM ERROR:", claimError);
-        else console.log("PROMOTED:", currentQueue[0].user_id);
-      }
-    }
-
-    showToast("Session ended!");
-    await refreshAll();
-  };
-
-    showToast("Session ended!");
-    await refreshAll();
-  };
-
-  // ---- QR ----
-  useEffect(() => {
-    if (!currentUser) return;
-    const t = setInterval(async () => {
-      setTick(n => n + 1);
-      const now = Date.now();
-
       for (const [eqId, claim] of Object.entries(pendingClaims)) {
         if (claim && new Date(claim.claim_expires_at).getTime() <= now) {
           try {
@@ -429,6 +266,121 @@ export default function App() {
     }, 1000);
     return () => clearInterval(t);
   }, [currentUser, pendingClaims, activeSessions, queues, refreshAll]);
+
+  // ---- Queue actions ----
+  const addToQueue = async (equipId) => {
+    if (!profile) return;
+    const q = queues[equipId] || [];
+    if (q.find(u => u.user_id === profile.id)) { showToast("Already in this queue!", "error"); return; }
+
+    const { error } = await supabase.from("queue_entries").insert({ equipment_id: equipId, user_id: profile.id });
+    if (error) { console.log("JOIN ERROR:", error); showToast("Failed to join queue: " + error.message, "error"); return; }
+
+    const { data: existingSession } = await supabase.from("active_sessions").select("*").eq("equipment_id", equipId);
+    const { data: existingClaim } = await supabase.from("pending_claims").select("*").eq("equipment_id", equipId);
+    const { data: currentQueue } = await supabase.from("queue_entries").select("*").eq("equipment_id", equipId).order("joined_at", { ascending: true });
+
+    if ((!existingSession || existingSession.length === 0) && (!existingClaim || existingClaim.length === 0)) {
+      if (currentQueue && currentQueue.length > 0 && currentQueue[0].user_id === profile.id) {
+        await supabase.from("pending_claims").insert({
+          equipment_id: equipId, user_id: profile.id,
+          claim_expires_at: new Date(Date.now() + CLAIM_TIMEOUT * 1000).toISOString(),
+        });
+      }
+    }
+
+    const eq = equipment.find(e => e.id === equipId);
+    showToast(`Added to ${eq?.name} queue!`);
+    await refreshAll();
+  };
+
+  const leaveQueue = async (equipId) => {
+    if (!profile) return;
+    const q = queues[equipId] || [];
+    const isFirst = q[0]?.user_id === profile.id;
+
+    await supabase.from("queue_entries").delete().eq("equipment_id", equipId).eq("user_id", profile.id);
+
+    if (isFirst && pendingClaims[equipId]?.userId === profile.id) {
+      await supabase.from("pending_claims").delete().eq("equipment_id", equipId);
+      const remaining = q.filter(u => u.user_id !== profile.id);
+      if (remaining.length > 0) {
+        await supabase.from("pending_claims").insert({
+          equipment_id: equipId, user_id: remaining[0].user_id,
+          claim_expires_at: new Date(Date.now() + CLAIM_TIMEOUT * 1000).toISOString(),
+        });
+      }
+    }
+    showToast("Left the queue");
+    await refreshAll();
+  };
+
+  const claimTurn = async (equipId) => {
+    if (!profile) return;
+    const claim = pendingClaims[equipId];
+    if (!claim || claim.userId !== profile.id) return;
+    const eq = equipment.find(e => e.id === equipId);
+
+    console.log("CLAIMING:", { equipId, userId: profile.id });
+
+    const { error: sessionError } = await supabase.from("active_sessions").insert({
+      equipment_id: equipId, user_id: profile.id,
+      started_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + eq.time_limit_min * 60000).toISOString(),
+    });
+    if (sessionError) { console.log("SESSION ERROR:", sessionError); showToast("Failed to start: " + sessionError.message, "error"); return; }
+
+    const { error: claimDelError } = await supabase.from("pending_claims").delete().eq("equipment_id", equipId);
+    if (claimDelError) console.log("CLAIM DELETE ERROR:", claimDelError);
+
+    const { error: queueDelError } = await supabase.from("queue_entries").delete().eq("equipment_id", equipId).eq("user_id", profile.id);
+    if (queueDelError) console.log("QUEUE DELETE ERROR:", queueDelError);
+
+    showToast(`Started on ${eq.name}! You have ${eq.time_limit_min} minutes.`);
+    await refreshAll();
+  };
+
+  const endSession = async (equipId) => {
+    if (!profile) return;
+    const session = activeSessions[equipId];
+    if (!session || session.userId !== profile.id) return;
+
+    console.log("ENDING SESSION:", { equipId, userId: profile.id });
+
+    await supabase.from("active_sessions").delete().eq("equipment_id", equipId);
+
+    const { data: currentQueue } = await supabase
+      .from("queue_entries")
+      .select("*")
+      .eq("equipment_id", equipId)
+      .order("joined_at", { ascending: true });
+
+    if (currentQueue && currentQueue.length > 0) {
+      const { data: existingClaim } = await supabase
+        .from("pending_claims")
+        .select("*")
+        .eq("equipment_id", equipId);
+
+      if (!existingClaim || existingClaim.length === 0) {
+        const { error: claimError } = await supabase.from("pending_claims").insert({
+          equipment_id: equipId,
+          user_id: currentQueue[0].user_id,
+          claim_expires_at: new Date(Date.now() + CLAIM_TIMEOUT * 1000).toISOString(),
+        });
+        if (claimError) console.log("PROMOTE CLAIM ERROR:", claimError);
+        else console.log("PROMOTED:", currentQueue[0].user_id);
+      }
+    }
+
+    showToast("Session ended!");
+     
+  };
+
+  // ---- QR ----
+  useEffect(() => {
+    if (view === VIEWS.QR && selectedEquipment && qrCanvasRef.current)
+      drawQR(qrCanvasRef.current, `GYMQ:${selectedEquipment}`, QR_SIZE);
+  }, [view, selectedEquipment]);
 
   const handleScanSubmit = () => {
     const trimmed = scanInput.trim();
