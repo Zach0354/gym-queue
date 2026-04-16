@@ -373,7 +373,7 @@ export default function App() {
     }
 
     showToast("Session ended!");
-     
+    await refreshAll();
   };
 
   // ---- QR ----
@@ -417,38 +417,143 @@ export default function App() {
 
   if (view === VIEWS.AUTH) {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center px-4">
-        <div className="w-full max-w-sm">
-          <div className="text-center mb-8">
-            <div className="text-5xl mb-3">🏋️</div>
-            <h1 className="text-3xl font-bold">GymQueue</h1>
-            <p className="text-gray-400 text-sm mt-1">Skip the wait, join the queue</p>
-          </div>
-          <div className="bg-gray-900 rounded-2xl border border-gray-800 p-6 space-y-4">
-            <div className="flex bg-gray-800 rounded-xl p-1">
-              <button onClick={() => { setAuthMode("login"); setAuthError(""); }}
-                className={`flex-1 py-2 text-sm font-medium rounded-lg transition ${authMode === "login" ? "bg-blue-600" : ""}`}>Log In</button>
-              <button onClick={() => { setAuthMode("register"); setAuthError(""); }}
-                className={`flex-1 py-2 text-sm font-medium rounded-lg transition ${authMode === "register" ? "bg-blue-600" : ""}`}>Sign Up</button>
+      <div className="min-h-screen bg-gray-950 text-white">
+        {/* Nav bar */}
+        <nav className="border-b border-gray-800 bg-gray-950/80 backdrop-blur-sm sticky top-0 z-50">
+          <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">🏋️</span>
+              <span className="font-bold text-xl">GymQueue</span>
             </div>
-            {authMode === "register" && (
-              <input value={authForm.displayName} onChange={e => setAuthForm(p => ({ ...p, displayName: e.target.value }))}
-                placeholder="Display Name" className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500" />
-            )}
-            <input value={authForm.username} onChange={e => setAuthForm(p => ({ ...p, username: e.target.value }))}
-              placeholder="Username" className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500"
-              onKeyDown={e => e.key === "Enter" && handleAuth()} />
-            <input value={authForm.password} onChange={e => setAuthForm(p => ({ ...p, password: e.target.value }))}
-              type="password" placeholder="Password"
-              className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500"
-              onKeyDown={e => e.key === "Enter" && handleAuth()} />
-            {authError && <p className="text-red-400 text-xs">{authError}</p>}
-            <button onClick={handleAuth} disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-semibold transition disabled:opacity-50">
-              {loading ? "Please wait..." : authMode === "login" ? "Log In" : "Create Account"}
-            </button>
-            {authMode === "login" && <p className="text-xs text-gray-500 text-center">Admin: admin / admin123</p>}
+            <div className="hidden sm:flex items-center gap-4 text-sm text-gray-400">
+              <a href="#features" className="hover:text-white transition">Features</a>
+              <a href="#how" className="hover:text-white transition">How It Works</a>
+            </div>
           </div>
+        </nav>
+
+        <div className="max-w-6xl mx-auto px-6">
+          {/* Hero section */}
+          <div className="flex flex-col lg:flex-row items-center gap-12 lg:gap-16 py-12 lg:py-20">
+            {/* Left: Marketing content */}
+            <div className="flex-1 text-center lg:text-left">
+              <div className="inline-block bg-blue-600/20 border border-blue-500/30 rounded-full px-4 py-1.5 text-xs font-medium text-blue-400 mb-6">
+                No more awkward hovering near equipment
+              </div>
+              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight mb-6">
+                Skip the Line,<br />
+                <span className="bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400 bg-clip-text text-transparent">
+                  Join the Queue
+                </span>
+              </h1>
+              <p className="text-gray-400 text-lg sm:text-xl max-w-xl mx-auto lg:mx-0 mb-8 leading-relaxed">
+                The smart way to share gym equipment. Join a virtual queue from your phone, get notified when it's your turn, and never waste time waiting around again.
+              </p>
+
+              {/* Stats */}
+              <div className="flex flex-wrap justify-center lg:justify-start gap-8 mb-10">
+                <div>
+                  <div className="text-2xl font-bold text-white">2 min</div>
+                  <div className="text-xs text-gray-500">Claim window</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-bold text-white">8+</div>
+                  <div className="text-xs text-gray-500">Equipment types</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-bold text-white">Real-time</div>
+                  <div className="text-xs text-gray-500">Queue updates</div>
+                </div>
+              </div>
+
+              {/* Feature pills */}
+              <div id="features" className="flex flex-wrap justify-center lg:justify-start gap-3 mb-8">
+                {[
+                  { icon: "📱", text: "Scan QR to join" },
+                  { icon: "⏱️", text: "Timed sessions" },
+                  { icon: "🔔", text: "Instant notifications" },
+                  { icon: "👥", text: "Fair turn system" },
+                ].map((f, i) => (
+                  <div key={i} className="flex items-center gap-2 bg-gray-900 border border-gray-800 rounded-full px-4 py-2 text-sm">
+                    <span>{f.icon}</span>
+                    <span className="text-gray-300">{f.text}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Right: Auth card */}
+            <div className="w-full max-w-sm flex-shrink-0">
+              <div className="bg-gray-900 rounded-2xl border border-gray-800 p-6 space-y-4 shadow-2xl shadow-blue-900/10">
+                <div className="text-center mb-2">
+                  <h2 className="text-xl font-bold">Get Started</h2>
+                  <p className="text-gray-500 text-xs mt-1">Free for all gym members</p>
+                </div>
+                <div className="flex bg-gray-800 rounded-xl p-1">
+                  <button onClick={() => { setAuthMode("login"); setAuthError(""); }}
+                    className={`flex-1 py-2 text-sm font-medium rounded-lg transition ${authMode === "login" ? "bg-blue-600" : ""}`}>Log In</button>
+                  <button onClick={() => { setAuthMode("register"); setAuthError(""); }}
+                    className={`flex-1 py-2 text-sm font-medium rounded-lg transition ${authMode === "register" ? "bg-blue-600" : ""}`}>Sign Up</button>
+                </div>
+                {authMode === "register" && (
+                  <input value={authForm.displayName} onChange={e => setAuthForm(p => ({ ...p, displayName: e.target.value }))}
+                    placeholder="Display Name" className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500" />
+                )}
+                <input value={authForm.username} onChange={e => setAuthForm(p => ({ ...p, username: e.target.value }))}
+                  placeholder="Username" className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500"
+                  onKeyDown={e => e.key === "Enter" && handleAuth()} />
+                <input value={authForm.password} onChange={e => setAuthForm(p => ({ ...p, password: e.target.value }))}
+                  type="password" placeholder="Password"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500"
+                  onKeyDown={e => e.key === "Enter" && handleAuth()} />
+                {authError && <p className="text-red-400 text-xs">{authError}</p>}
+                <button onClick={handleAuth} disabled={loading}
+                  className="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-semibold transition disabled:opacity-50">
+                  {loading ? "Please wait..." : authMode === "login" ? "Log In" : "Create Account"}
+                </button>
+                {authMode === "login" && <p className="text-xs text-gray-500 text-center">Admin: admin / admin123</p>}
+              </div>
+            </div>
+          </div>
+
+          {/* How it works */}
+          <div id="how" className="py-12 lg:py-20 border-t border-gray-800">
+            <h2 className="text-2xl sm:text-3xl font-bold text-center mb-12">How It Works</h2>
+            <div className="grid sm:grid-cols-3 gap-8 max-w-3xl mx-auto">
+              {[
+                { step: "1", icon: "📷", title: "Scan the QR Code", desc: "Each piece of equipment has a unique QR code. Scan it with your phone to join the virtual queue." },
+                { step: "2", icon: "⏳", title: "Wait Your Turn", desc: "Keep working out while you wait. You'll see your position in the queue update in real time." },
+                { step: "3", icon: "💪", title: "Claim & Start", desc: "When it's your turn, you have 2 minutes to claim the equipment and start your timed session." },
+              ].map((item, i) => (
+                <div key={i} className="text-center">
+                  <div className="w-14 h-14 rounded-2xl bg-gray-900 border border-gray-800 flex items-center justify-center text-2xl mx-auto mb-4">
+                    {item.icon}
+                  </div>
+                  <div className="text-xs text-blue-400 font-semibold mb-2">STEP {item.step}</div>
+                  <h3 className="font-bold mb-2">{item.title}</h3>
+                  <p className="text-gray-400 text-sm leading-relaxed">{item.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Testimonial / CTA */}
+          <div className="py-12 lg:py-20 border-t border-gray-800 text-center">
+            <div className="max-w-2xl mx-auto">
+              <div className="text-4xl mb-4">🏆</div>
+              <h2 className="text-2xl sm:text-3xl font-bold mb-4">Ready to transform your gym experience?</h2>
+              <p className="text-gray-400 mb-8">Join hundreds of gym-goers who've ditched the awkward wait and switched to GymQueue.</p>
+              <button onClick={() => { setAuthMode("register"); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                className="bg-blue-600 hover:bg-blue-500 px-8 py-3 rounded-xl font-semibold transition text-lg">
+                Sign Up Free
+              </button>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <footer className="border-t border-gray-800 py-8 text-center text-gray-600 text-xs">
+            <p>© 2025 GymQueue. Built to make gyms fairer for everyone.</p>
+          </footer>
         </div>
       </div>
     );
